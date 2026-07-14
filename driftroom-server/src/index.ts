@@ -1,0 +1,108 @@
+import express from "express";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import cors from "cors";
+
+const app = express();
+app.use(cors());
+const httpServer = createServer(app);
+
+const io = new Server(httpServer, {
+  cors: { origin: process.env.CLIENT_URL || "http://localhost:3000" },
+});
+
+type QueuedUser = { socketId: string; nickname: string };
+type ActiveRoom = { roomId: string; users: [QueuedUser, QueuedUser]; category: string };
+
+const queues = new Map<string, QueuedUser[]>(); // category -> waiting users
+const rooms = new Map<string, ActiveRoom>(); // roomId -> room
+const socketRoom = new Map<string, string>(); // socketId -> roomId
+
+function getQueue(category: string) {
+  if (!queues.has(category)) queues.set(category, []);
+  return queues.get(category)!;
+}
+
+function tryMatch(category: string) {
+  const queue = getQueue(category);
+  while (queue.length >= 2) {
+    const a = queue.shift()!;
+    const b = queue.shift()!;
+
+    // guard against stale/disconnected sockets sitting in the queue
+    if (!io.sockets.sockets.get(a.socketId)) continue;
+    if (!io.sockets.sockets.get(b.socketId)) {
+      queue.unshift(a);
+      continue;
+    }
+
+    const roomId = `${category}-${a.socketId}-${b.socketId}`;
+    rooms.set(roomId, { roomId, users: [a, b], category });
+    socketRoom.set(a.socketId, roomId);
+    socketRoom.set(b.socketId, roomId);
+
+    io.sockets.sockets.get(a.socketId)?.join(roomId);
+    io.sockets.sockets.get(b.socketId)?.join(roomId);
+
+    io.to(a.socketId).emit("matched", { roomId, partner: b.nickname, category });
+    io.to(b.socketId).emit("matched", { roomId, partner: a.nickname, category });
+  }
+}
+
+function leaveQueue(socketId: string) {
+  for (const queue of queues.values()) {
+    const idx = queue.findIndex((u) => u.socketId === socketId);
+    if (idx !== -1) queue.splice(idx, 1);
+  }
+}
+
+function leaveRoom(socketId: string, notifyPartner: boolean) {
+  const roomId = socketRoom.get(socketId);
+  if (!roomId) return;
+  const room = rooms.get(roomId);
+  if (room && notifyPartner) {
+    const partner = room.users.find((u) => u.socketId !== socketId);
+    if (partner) io.to(partner.socketId).emit("partner-left");
+  }
+  rooms.delete(roomId);
+  socketRoom.delete(socketId);
+  if (room) {
+    for (const u of room.users) socketRoom.delete(u.socketId);
+  }
+}
+
+io.on("connection", (socket) => {
+  socket.on("join-queue", ({ nickname, category }: { nickname: string; category: string }) => {
+    // Only clear a stale queue entry — do NOT tear down an active room here.
+    // (Previously this called leaveRoom() too, which could destroy a just-created
+    // room if join-queue fired twice for the same socket, e.g. React Strict Mode.)
+    leaveQueue(socket.id);
+
+    const queue = getQueue(category);
+    queue.push({ socketId: socket.id, nickname });
+    tryMatch(category);
+  });
+
+  socket.on("send-message", ({ text }: { text: string }) => {
+    const roomId = socketRoom.get(socket.id);
+    if (!roomId) return;
+    const room = rooms.get(roomId);
+    if (!room) return;
+    const sender = room.users.find((u) => u.socketId === socket.id);
+    socket.to(roomId).emit("message", {
+      text,
+      from: sender?.nickname ?? "unknown",
+      time: new Date().toISOString(),
+    });
+  });
+
+  socket.on("leave-room", () => leaveRoom(socket.id, true));
+
+  socket.on("disconnect", () => {
+    leaveQueue(socket.id);
+    leaveRoom(socket.id, true);
+  });
+});
+
+const PORT = process.env.PORT || 4000;
+httpServer.listen(PORT, () => console.log(`driftroom server on :${PORT}`));
