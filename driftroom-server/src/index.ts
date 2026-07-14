@@ -5,14 +5,23 @@ import cors from "cors";
 
 const app = express();
 app.use(cors());
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok" });
+});
+
 const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: { origin: process.env.CLIENT_URL || "http://localhost:3000" },
 });
 
-type QueuedUser = { socketId: string; nickname: string };
-type ActiveRoom = { roomId: string; users: [QueuedUser, QueuedUser]; category: string };
+type QueuedUser = { socketId: string; nickname: string; sessionId: string };
+type ActiveRoom = {
+  roomId: string;
+  users: [QueuedUser, QueuedUser];
+  category: string;
+};
 
 const queues = new Map<string, QueuedUser[]>(); // category -> waiting users
 const rooms = new Map<string, ActiveRoom>(); // roomId -> room
@@ -25,16 +34,38 @@ function getQueue(category: string) {
 
 function tryMatch(category: string) {
   const queue = getQueue(category);
-  while (queue.length >= 2) {
-    const a = queue.shift()!;
-    const b = queue.shift()!;
 
-    // guard against stale/disconnected sockets sitting in the queue
-    if (!io.sockets.sockets.get(a.socketId)) continue;
-    if (!io.sockets.sockets.get(b.socketId)) {
-      queue.unshift(a);
+  // Clear out any dead sockets first so they don't block matching.
+  for (let i = queue.length - 1; i >= 0; i--) {
+    if (!io.sockets.sockets.get(queue[i].socketId)) queue.splice(i, 1);
+  }
+
+  // Try to pair the front of the queue with the first compatible partner
+  // (different sessionId) further down the queue — this avoids the
+  // self-match issue where two tabs from the same browser pair with
+  // each other.
+  let i = 0;
+  while (i < queue.length) {
+    const a = queue[i];
+    let matchIndex = -1;
+
+    for (let j = i + 1; j < queue.length; j++) {
+      if (queue[j].sessionId !== a.sessionId) {
+        matchIndex = j;
+        break;
+      }
+    }
+
+    if (matchIndex === -1) {
+      // No compatible partner for `a` yet — leave it in the queue and move on.
+      i++;
       continue;
     }
+
+    const b = queue[matchIndex];
+    // Remove b first (higher index) then a, to keep indices valid.
+    queue.splice(matchIndex, 1);
+    queue.splice(i, 1);
 
     const roomId = `${category}-${a.socketId}-${b.socketId}`;
     rooms.set(roomId, { roomId, users: [a, b], category });
@@ -44,8 +75,18 @@ function tryMatch(category: string) {
     io.sockets.sockets.get(a.socketId)?.join(roomId);
     io.sockets.sockets.get(b.socketId)?.join(roomId);
 
-    io.to(a.socketId).emit("matched", { roomId, partner: b.nickname, category });
-    io.to(b.socketId).emit("matched", { roomId, partner: a.nickname, category });
+    io.to(a.socketId).emit("matched", {
+      roomId,
+      partner: b.nickname,
+      category,
+    });
+    io.to(b.socketId).emit("matched", {
+      roomId,
+      partner: a.nickname,
+      category,
+    });
+
+    // Don't advance `i` — a new user now sits at this index; loop will recheck it.
   }
 }
 
@@ -72,16 +113,24 @@ function leaveRoom(socketId: string, notifyPartner: boolean) {
 }
 
 io.on("connection", (socket) => {
-  socket.on("join-queue", ({ nickname, category }: { nickname: string; category: string }) => {
-    // Only clear a stale queue entry — do NOT tear down an active room here.
-    // (Previously this called leaveRoom() too, which could destroy a just-created
-    // room if join-queue fired twice for the same socket, e.g. React Strict Mode.)
-    leaveQueue(socket.id);
+  socket.on(
+    "join-queue",
+    ({
+      nickname,
+      category,
+      sessionId,
+    }: {
+      nickname: string;
+      category: string;
+      sessionId: string;
+    }) => {
+      leaveQueue(socket.id);
 
-    const queue = getQueue(category);
-    queue.push({ socketId: socket.id, nickname });
-    tryMatch(category);
-  });
+      const queue = getQueue(category);
+      queue.push({ socketId: socket.id, nickname, sessionId });
+      tryMatch(category);
+    },
+  );
 
   socket.on("send-message", ({ text }: { text: string }) => {
     const roomId = socketRoom.get(socket.id);
@@ -97,6 +146,8 @@ io.on("connection", (socket) => {
   });
 
   socket.on("leave-room", () => leaveRoom(socket.id, true));
+
+  socket.on("leave-queue", () => leaveQueue(socket.id));
 
   socket.on("disconnect", () => {
     leaveQueue(socket.id);
