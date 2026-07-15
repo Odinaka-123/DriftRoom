@@ -44,15 +44,18 @@ function ConnectingInner() {
       roomId,
       partner,
       category: matchedCategory,
+      initiator,
     }: {
       roomId: string;
       partner: string;
       category: string;
+      initiator: boolean;
     }) {
       if (timeoutId) clearTimeout(timeoutId);
       setPhase("found");
       sessionStorage.setItem("driftroom:roomId", roomId);
       sessionStorage.setItem("driftroom:partner", partner);
+      sessionStorage.setItem("driftroom:initiator", String(initiator));
       setTimeout(() => {
         router.push(`/chat?category=${matchedCategory}`);
       }, 700);

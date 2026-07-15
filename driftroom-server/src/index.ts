@@ -23,9 +23,9 @@ type ActiveRoom = {
   category: string;
 };
 
-const queues = new Map<string, QueuedUser[]>(); // category -> waiting users
-const rooms = new Map<string, ActiveRoom>(); // roomId -> room
-const socketRoom = new Map<string, string>(); // socketId -> roomId
+const queues = new Map<string, QueuedUser[]>();
+const rooms = new Map<string, ActiveRoom>();
+const socketRoom = new Map<string, string>();
 
 function getQueue(category: string) {
   if (!queues.has(category)) queues.set(category, []);
@@ -35,15 +35,10 @@ function getQueue(category: string) {
 function tryMatch(category: string) {
   const queue = getQueue(category);
 
-  // Clear out any dead sockets first so they don't block matching.
   for (let i = queue.length - 1; i >= 0; i--) {
     if (!io.sockets.sockets.get(queue[i].socketId)) queue.splice(i, 1);
   }
 
-  // Try to pair the front of the queue with the first compatible partner
-  // (different sessionId) further down the queue — this avoids the
-  // self-match issue where two tabs from the same browser pair with
-  // each other.
   let i = 0;
   while (i < queue.length) {
     const a = queue[i];
@@ -57,13 +52,11 @@ function tryMatch(category: string) {
     }
 
     if (matchIndex === -1) {
-      // No compatible partner for `a` yet — leave it in the queue and move on.
       i++;
       continue;
     }
 
     const b = queue[matchIndex];
-    // Remove b first (higher index) then a, to keep indices valid.
     queue.splice(matchIndex, 1);
     queue.splice(i, 1);
 
@@ -75,18 +68,20 @@ function tryMatch(category: string) {
     io.sockets.sockets.get(a.socketId)?.join(roomId);
     io.sockets.sockets.get(b.socketId)?.join(roomId);
 
+    // `a` is designated the WebRTC initiator (creates the offer);
+    // `b` waits and answers. Arbitrary but must be exactly one side.
     io.to(a.socketId).emit("matched", {
       roomId,
       partner: b.nickname,
       category,
+      initiator: true,
     });
     io.to(b.socketId).emit("matched", {
       roomId,
       partner: a.nickname,
       category,
+      initiator: false,
     });
-
-    // Don't advance `i` — a new user now sits at this index; loop will recheck it.
   }
 }
 
@@ -125,7 +120,6 @@ io.on("connection", (socket) => {
       sessionId: string;
     }) => {
       leaveQueue(socket.id);
-
       const queue = getQueue(category);
       queue.push({ socketId: socket.id, nickname, sessionId });
       tryMatch(category);
@@ -145,8 +139,32 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("leave-room", () => leaveRoom(socket.id, true));
+  // --- WebRTC signaling relay ---
+  // The server never sees audio, only these small SDP/ICE messages needed
+  // to establish the direct peer-to-peer connection.
 
+  socket.on("webrtc-offer", ({ sdp }: { sdp: RTCSessionDescriptionInit }) => {
+    const roomId = socketRoom.get(socket.id);
+    if (!roomId) return;
+    socket.to(roomId).emit("webrtc-offer", { sdp });
+  });
+
+  socket.on("webrtc-answer", ({ sdp }: { sdp: RTCSessionDescriptionInit }) => {
+    const roomId = socketRoom.get(socket.id);
+    if (!roomId) return;
+    socket.to(roomId).emit("webrtc-answer", { sdp });
+  });
+
+  socket.on(
+    "webrtc-ice-candidate",
+    ({ candidate }: { candidate: RTCIceCandidateInit }) => {
+      const roomId = socketRoom.get(socket.id);
+      if (!roomId) return;
+      socket.to(roomId).emit("webrtc-ice-candidate", { candidate });
+    },
+  );
+
+  socket.on("leave-room", () => leaveRoom(socket.id, true));
   socket.on("leave-queue", () => leaveQueue(socket.id));
 
   socket.on("disconnect", () => {
