@@ -37,7 +37,7 @@ export default function Home() {
   const ready = nickname.trim() && category;
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-ink px-6 py-16">
+    <main className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-ink px-6 py-16">
       <DriftField />
 
       <div className="relative z-10 w-full max-w-md text-center">

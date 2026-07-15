@@ -111,7 +111,7 @@ function ConnectingInner() {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-ink px-6">
+    <main className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-ink px-6">
       <DriftField />
 
       <div className="relative z-10 flex flex-col items-center text-center">

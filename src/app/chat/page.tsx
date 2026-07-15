@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getSocket } from "@/lib/socket";
 import { createPeerConnection } from "@/lib/webrtc";
+import { useWakeLock } from "@/lib/wakelock";
 
 type Message = {
   id: string;
@@ -51,6 +52,7 @@ function ChatInner() {
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  useWakeLock(!partnerLeft);
 
   useEffect(() => {
     const savedNickname = localStorage.getItem("driftroom:nickname");
@@ -170,8 +172,7 @@ function ChatInner() {
     }
 
     function onMessage({
-      text,
-      from,
+      text,  
       time,
     }: {
       text: string;
@@ -280,7 +281,7 @@ function ChatInner() {
   if (!nickname || !partner) return null;
 
   return (
-    <div className="relative flex h-screen flex-col bg-ink text-paper overflow-hidden">
+    <div className="relative flex h-dvh flex-col bg-ink text-paper overflow-hidden">
       <audio ref={remoteAudioRef} autoPlay />
 
       {/* Full-screen call UI */}
