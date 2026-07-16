@@ -52,6 +52,7 @@ function ChatInner() {
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+
   useWakeLock(!partnerLeft);
 
   useEffect(() => {
@@ -65,19 +66,17 @@ function ChatInner() {
       return;
     }
 
-    // avoid synchronous setState inside effect to prevent cascading renders
-    setTimeout(() => {
-      setNickname(savedNickname);
-      setPartner(savedPartner);
-      setMessages([
-        {
-          id: "s1",
-          author: "system",
-          text: `connected to ${savedPartner} · #${LABELS[category] ?? category}`,
-          time: timeNow(),
-        },
-      ]);
-    }, 0);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time init from storage on mount, gated by the redirect check above
+    setNickname(savedNickname);
+    setPartner(savedPartner);
+    setMessages([
+      {
+        id: "s1",
+        author: "system",
+        text: `connected to ${savedPartner} · #${LABELS[category] ?? category}`,
+        time: timeNow(),
+      },
+    ]);
 
     const socket = getSocket();
     let cancelled = false;
@@ -171,14 +170,7 @@ function ChatInner() {
       await pc.addIceCandidate(new RTCIceCandidate(candidate));
     }
 
-    function onMessage({
-      text,  
-      time,
-    }: {
-      text: string;
-      from: string;
-      time: string;
-    }) {
+    function onMessage({ text, time }: { text: string; time: string }) {
       setMessages((prev) => [
         ...prev,
         {
@@ -224,7 +216,8 @@ function ChatInner() {
       pcRef.current?.close();
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
     };
-  }, [router, category]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, category]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -281,7 +274,7 @@ function ChatInner() {
   if (!nickname || !partner) return null;
 
   return (
-    <div className="relative flex h-dvh flex-col bg-ink text-paper overflow-hidden">
+    <div className="relative flex h-screen h-dvh flex-col bg-ink text-paper overflow-hidden">
       <audio ref={remoteAudioRef} autoPlay />
 
       {/* Full-screen call UI */}
@@ -363,9 +356,17 @@ function ChatInner() {
         </button>
       </div>
 
+      {/* Backdrop — tap outside to close on mobile */}
+      {chatOpen && (
+        <div
+          onClick={() => setChatOpen(false)}
+          className="absolute inset-0 z-10 bg-black/40 backdrop-blur-sm sm:hidden"
+        />
+      )}
+
       {/* Slide-out chat drawer */}
       <div
-        className={`absolute inset-y-0 right-0 z-20 flex w-full max-w-sm flex-col border-l border-line bg-ink-2 transition-transform duration-300 ${
+        className={`absolute inset-y-0 right-0 z-20 flex w-full flex-col border-l border-line bg-ink-2 transition-transform duration-300 sm:w-full sm:max-w-sm ${
           chatOpen ? "translate-x-0" : "translate-x-full"
         }`}
       >
@@ -373,9 +374,10 @@ function ChatInner() {
           <h2 className="font-display text-sm font-semibold">Chat</h2>
           <button
             onClick={() => setChatOpen(false)}
-            className="font-mono text-xs text-mist hover:text-paper"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-mist transition hover:bg-ink hover:text-paper"
+            aria-label="Close chat"
           >
-            close
+            <span className="font-mono text-base">✕</span>
           </button>
         </header>
 
@@ -410,7 +412,7 @@ function ChatInner() {
           </div>
         </div>
 
-        <div className="border-t border-line px-5 py-4">
+        <div className="border-t border-line px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <div className="flex items-center gap-2 rounded-full border border-line bg-ink px-4 py-2.5 focus-within:border-signal/60">
             <input
               value={draft}
