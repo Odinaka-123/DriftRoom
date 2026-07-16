@@ -357,27 +357,29 @@ function ChatInner() {
       </div>
 
       {/* Backdrop — tap outside to close on mobile */}
+      {/* Backdrop — tap outside to close on mobile */}
       {chatOpen && (
         <div
           onClick={() => setChatOpen(false)}
-          className="absolute inset-0 z-10 bg-black/40 backdrop-blur-sm sm:hidden"
+          className="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm sm:hidden"
         />
       )}
 
       {/* Slide-out chat drawer */}
       <div
-        className={`absolute inset-y-0 right-0 z-20 flex w-full flex-col border-l border-line bg-ink-2 transition-transform duration-300 sm:w-full sm:max-w-sm ${
-          chatOpen ? "translate-x-0" : "translate-x-full"
+        className={`fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-line bg-ink-2 transition-transform duration-300 sm:w-full sm:max-w-sm ${
+          chatOpen ? "translate-x-0" : "pointer-events-none translate-x-full"
         }`}
       >
         <header className="flex items-center justify-between border-b border-line px-5 py-4">
           <h2 className="font-display text-sm font-semibold">Chat</h2>
           <button
+            type="button"
             onClick={() => setChatOpen(false)}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-mist transition hover:bg-ink hover:text-paper"
+            className="flex h-10 w-10 items-center justify-center rounded-full text-mist transition hover:bg-ink hover:text-paper active:bg-ink"
             aria-label="Close chat"
           >
-            <span className="font-mono text-base">✕</span>
+            <span className="font-mono text-lg">✕</span>
           </button>
         </header>
 
