@@ -32,6 +32,10 @@ function getQueue(category: string) {
   return queues.get(category)!;
 }
 
+function broadcastPresence() {
+  io.emit("presence-count", { count: io.engine.clientsCount });
+}
+
 function tryMatch(category: string) {
   const queue = getQueue(category);
 
@@ -68,8 +72,6 @@ function tryMatch(category: string) {
     io.sockets.sockets.get(a.socketId)?.join(roomId);
     io.sockets.sockets.get(b.socketId)?.join(roomId);
 
-    // `a` is designated the WebRTC initiator (creates the offer);
-    // `b` waits and answers. Arbitrary but must be exactly one side.
     io.to(a.socketId).emit("matched", {
       roomId,
       partner: b.nickname,
@@ -108,6 +110,8 @@ function leaveRoom(socketId: string, notifyPartner: boolean) {
 }
 
 io.on("connection", (socket) => {
+  broadcastPresence();
+
   socket.on(
     "join-queue",
     ({
@@ -139,10 +143,6 @@ io.on("connection", (socket) => {
     });
   });
 
-  // --- WebRTC signaling relay ---
-  // The server never sees audio, only these small SDP/ICE messages needed
-  // to establish the direct peer-to-peer connection.
-
   socket.on("webrtc-offer", ({ sdp }: { sdp: RTCSessionDescriptionInit }) => {
     const roomId = socketRoom.get(socket.id);
     if (!roomId) return;
@@ -170,6 +170,7 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     leaveQueue(socket.id);
     leaveRoom(socket.id, true);
+    broadcastPresence();
   });
 });
 
