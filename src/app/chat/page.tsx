@@ -427,7 +427,7 @@ function ChatInner() {
             <button
               onClick={sendMessage}
               disabled={!draft.trim() || partnerLeft}
-              className="rounded-full bg-signal px-3 py-1 font-display text-xs font-semibold text-ink transition hover:bg-signal/90 disabled:opacity-40"
+              className="rounded-full bg-signal px-3 py-1 font-display text-xs font-semibold text-ink transition hover:bg-signal/90 disabled:opacity-30"
             >
               Send
             </button>
